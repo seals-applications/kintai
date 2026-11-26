@@ -468,7 +468,8 @@
     applyRecordToCache(optimistic);
     cache.del('hist:' + target); // 修正履歴は次に開いたときに取り直す
     cache.del('hist:all');
-    location.hash = '#home';
+    // 開いた元の画面へ戻る（勤怠履歴から来たなら勤怠履歴、それ以外はホーム）
+    location.hash = $('#edit-back').getAttribute('href') || '#home';
     toast('保存中…');
 
     api('updateRecord', { date: date, targetId: target, in: inT, out: outT, reason: reason })
@@ -488,6 +489,7 @@
         if (e && e.code === 'AUTH') return;
         toast('保存できませんでした：' + e.message, 'error');
         if (isView('home')) openHome();
+        if (isView('history')) loadMonth();
       });
   }
 
