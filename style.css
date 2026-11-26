@@ -1,0 +1,122 @@
+:root {
+  --bg: #f4f6fa;
+  --card: #ffffff;
+  --text: #1f2937;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --primary: #2563eb;
+  --in: #16a34a;
+  --out: #ea580c;
+  --auto: #f59e0b;
+  --edit: #7c3aed;
+  --error: #dc2626;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
+  font-size: 16px;
+  -webkit-tap-highlight-color: transparent;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
+[hidden] { display: none !important; }
+.view { max-width: 520px; margin: 0 auto; padding: 16px; min-height: 100vh; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.center { text-align: center; }
+
+/* ログイン */
+.login-box { text-align: center; padding-top: 12vh; }
+.login-icon { width: 88px; height: 88px; border-radius: 20px; }
+.login-box h1 { margin: 16px 0 8px; font-size: 24px; }
+.gsi-button { display: flex; justify-content: center; margin: 28px 0 12px; min-height: 44px; }
+.login-msg { color: var(--error); font-size: 14px; white-space: pre-wrap; }
+
+/* ホーム */
+.home-head { text-align: center; padding: 20px 0 8px; }
+.home-name { font-size: 18px; font-weight: 600; }
+.home-clock { font-size: 44px; font-weight: 700; letter-spacing: 1px; margin: 8px 0 2px; font-variant-numeric: tabular-nums; }
+.home-today { color: var(--muted); font-size: 15px; min-height: 22px; }
+.home-buttons { display: flex; flex-direction: column; gap: 14px; margin-top: 20px; }
+.big-btn {
+  border: none; border-radius: 18px; color: #fff; font-size: 26px; font-weight: 700;
+  padding: 26px 0; letter-spacing: 6px; box-shadow: 0 4px 10px rgba(0,0,0,.08);
+}
+.big-btn:active { transform: scale(.98); }
+.big-btn:disabled { opacity: .5; }
+.btn-in { background: var(--in); }
+.btn-out { background: var(--out); }
+.sub-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.sub-btn, .admin-btn {
+  display: block; text-align: center; text-decoration: none; color: var(--text);
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 20px 0; font-size: 18px; font-weight: 600;
+}
+.admin-btn { padding: 14px 0; font-size: 16px; color: var(--primary); }
+.home-foot { text-align: center; margin-top: 36px; }
+.link-btn { background: none; border: none; color: var(--muted); font-size: 14px; text-decoration: underline; }
+
+/* 共通 */
+.bar { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.bar h2 { font-size: 20px; margin: 0; }
+.back { text-decoration: none; color: var(--primary); font-size: 17px; padding: 6px 0; }
+.card { background: var(--card); border-radius: 14px; padding: 16px; border: 1px solid var(--line); }
+.field { display: block; font-size: 14px; color: var(--muted); margin-bottom: 14px; }
+.field.compact { margin: 8px 0; }
+.field input, .field select {
+  display: block; width: 100%; margin-top: 6px; font-size: 17px; color: var(--text);
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fff;
+  -webkit-appearance: none; appearance: none; min-height: 46px;
+}
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.primary-btn {
+  width: 100%; border: none; border-radius: 12px; background: var(--primary); color: #fff;
+  font-size: 17px; font-weight: 700; padding: 14px 0; margin-top: 4px;
+}
+.primary-btn:disabled { opacity: .5; }
+.section-title { font-size: 15px; margin: 24px 0 8px; }
+
+/* 修正履歴 */
+.history-list { list-style: none; padding: 0; margin: 0; }
+.history-list li {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 8px; font-size: 14px;
+}
+.history-list .h-top { color: var(--muted); font-size: 12px; }
+.history-list .h-main { margin-top: 2px; }
+.history-list .h-reason { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.history-list .empty { color: var(--muted); text-align: center; }
+
+/* 勤怠履歴 */
+.tabs { display: grid; grid-template-columns: 1fr 1fr; background: #e5e7eb; border-radius: 10px; padding: 3px; }
+.tab { border: none; background: none; padding: 9px 0; font-size: 15px; border-radius: 8px; color: var(--muted); }
+.tab.active { background: #fff; color: var(--text); font-weight: 700; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.month-nav { display: flex; align-items: center; justify-content: center; gap: 20px; margin: 14px 0 4px; font-size: 18px; font-weight: 700; }
+.nav-btn { border: 1px solid var(--line); background: #fff; border-radius: 8px; width: 40px; height: 36px; font-size: 20px; }
+.hist-total { text-align: center; color: var(--muted); font-size: 14px; margin-bottom: 8px; min-height: 20px; }
+.log-table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 10px; overflow: hidden; font-size: 14px; }
+.log-table th { background: #eef2f7; font-weight: 600; font-size: 12px; color: var(--muted); padding: 8px 4px; }
+.log-table td { padding: 10px 4px; border-top: 1px solid var(--line); text-align: center; font-variant-numeric: tabular-nums; }
+.log-table tr.clickable:active td { background: #eef2ff; }
+.log-table .sat { color: #2563eb; }
+.log-table .sun { color: #dc2626; }
+.log-table .blank { color: #c0c4cc; }
+.badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 6px; color: #fff; margin-left: 2px; }
+.badge.auto { background: var(--auto); }
+.badge.edit { background: var(--edit); }
+.date-group td { background: #f8fafc; text-align: left; font-weight: 600; font-size: 13px; padding: 6px 10px; }
+
+/* ローディング・トースト */
+.loading { position: fixed; inset: 0; background: rgba(255,255,255,.5); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.spinner { width: 40px; height: 40px; border: 4px solid #dbeafe; border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.toast {
+  position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  background: #111827; color: #fff; padding: 12px 18px; border-radius: 12px; font-size: 15px;
+  max-width: 90vw; z-index: 60; box-shadow: 0 6px 16px rgba(0,0,0,.2); white-space: pre-wrap; text-align: center;
+}
+.toast.success { background: var(--in); }
+.toast.error { background: var(--error); }

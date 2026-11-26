@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2563eb">
+  <title>勤怠報告</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="icon-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-title" content="勤怠報告">
+  <link rel="stylesheet" href="style.css">
+  <script src="config.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <!-- ログイン -->
+  <section id="view-login" class="view" hidden>
+    <div class="login-box">
+      <img src="icon-192.png" alt="" class="login-icon">
+      <h1>勤怠報告</h1>
+      <p class="muted">会社に登録したGoogleアカウントでログインしてください。<br>ログインは最初の1回だけです。</p>
+      <div id="gsi-button" class="gsi-button"></div>
+      <p id="login-msg" class="login-msg"></p>
+    </div>
+  </section>
+
+  <!-- ホーム -->
+  <section id="view-home" class="view" hidden>
+    <header class="home-head">
+      <div id="home-name" class="home-name"></div>
+      <div id="home-clock" class="home-clock"></div>
+      <div id="home-today" class="home-today"></div>
+    </header>
+    <div class="home-buttons">
+      <button id="btn-in" class="big-btn btn-in">出 勤</button>
+      <button id="btn-out" class="big-btn btn-out">退 勤</button>
+      <div class="sub-buttons">
+        <a href="#edit" class="sub-btn">打刻修正</a>
+        <a href="#history" class="sub-btn">勤怠履歴</a>
+      </div>
+      <a href="#admin" id="btn-admin" class="admin-btn" hidden>管理</a>
+    </div>
+    <footer class="home-foot">
+      <button id="btn-logout" class="link-btn">ログアウト</button>
+    </footer>
+  </section>
+
+  <!-- 打刻修正 -->
+  <section id="view-edit" class="view" hidden>
+    <header class="bar"><a href="#home" class="back">‹ 戻る</a><h2>打刻修正</h2></header>
+    <div class="card">
+      <label id="edit-target-wrap" class="field" hidden>社員
+        <select id="edit-target"></select>
+      </label>
+      <label class="field">日付
+        <input type="date" id="edit-date">
+      </label>
+      <div class="row2">
+        <label class="field">出勤
+          <input type="time" id="edit-in">
+        </label>
+        <label class="field">退勤
+          <input type="time" id="edit-out">
+        </label>
+      </div>
+      <p id="edit-info" class="muted small"></p>
+      <label class="field">理由（任意）
+        <input type="text" id="edit-reason" maxlength="200" placeholder="例：打刻忘れ">
+      </label>
+      <button id="edit-save" class="primary-btn">保存</button>
+    </div>
+    <h3 class="section-title" id="edit-history-title">修正履歴</h3>
+    <ul id="edit-history" class="history-list"></ul>
+  </section>
+
+  <!-- 勤怠履歴 -->
+  <section id="view-history" class="view" hidden>
+    <header class="bar"><a href="#home" class="back">‹ 戻る</a><h2>勤怠履歴</h2></header>
+    <div class="tabs">
+      <button class="tab" data-tab="me">自分</button>
+      <button class="tab" data-tab="all">全員</button>
+    </div>
+    <div class="month-nav">
+      <button id="month-prev" class="nav-btn">‹</button>
+      <span id="month-label"></span>
+      <button id="month-next" class="nav-btn">›</button>
+    </div>
+    <label id="hist-target-wrap" class="field compact" hidden>
+      <select id="hist-target"></select>
+    </label>
+    <div id="hist-total" class="hist-total"></div>
+    <table class="log-table">
+      <thead id="hist-head"></thead>
+      <tbody id="hist-body"></tbody>
+    </table>
+    <p class="muted small center">「自動」は打刻がなく自動で補完された日です。行をタップすると修正できます。</p>
+  </section>
+
+  <!-- 管理 -->
+  <section id="view-admin" class="view" hidden>
+    <header class="bar"><a href="#home" class="back">‹ 戻る</a><h2>管理</h2></header>
+    <h3 class="section-title">社員一覧</h3>
+    <p class="muted small">社員の追加・権限変更・退職（在籍チェックを外す）はスプレッドシートの「社員マスタ」で行います。</p>
+    <table class="log-table">
+      <thead><tr><th>氏名</th><th>権限</th><th>在籍</th><th>最終ログイン</th></tr></thead>
+      <tbody id="admin-emps"></tbody>
+    </table>
+    <h3 class="section-title">全員の修正履歴（新しい順）</h3>
+    <ul id="admin-history" class="history-list"></ul>
+  </section>
+
+  <div id="loading" class="loading" hidden><div class="spinner"></div></div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
