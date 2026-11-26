@@ -1,11 +1,20 @@
 (function () {
   'use strict';
 
+  /*
+   * 速く感じさせるための基本方針
+   * - 一度取得したデータは端末に記憶（cache）し、画面を開いたらまず記憶した内容をすぐ表示する
+   * - その裏でサーバーに最新を問い合わせ、返ってきたら表示を差し替える（右上に「更新中…」）
+   * - 打刻・保存は押した瞬間に画面へ反映し、サーバーへの送信は裏で行う（失敗したら元に戻して知らせる）
+   */
+
   var CFG = window.APP_CONFIG || {};
   var TOKEN_KEY = 'kintai_token';
   var USER_KEY = 'kintai_user';
-  var TODAY_KEY = 'kintai_today';
+  var CACHE_PREFIX = 'kc_';
   var WEEK = ['日', '月', '火', '水', '木', '金', '土'];
+  var BREAK_START = 13 * 60;
+  var BREAK_END = 14 * 60;
 
   var storage = {
     get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -13,14 +22,27 @@
     del: function (k) { try { localStorage.removeItem(k); } catch (e) { /* ignore */ } },
   };
 
+  // 端末に記憶するデータ（ログアウトで全て消す）
+  var cache = {
+    get: function (key) { return parseJSON(storage.get(CACHE_PREFIX + key)); },
+    set: function (key, v) { storage.set(CACHE_PREFIX + key, JSON.stringify(v)); },
+    del: function (key) { storage.del(CACHE_PREFIX + key); },
+    clearAll: function () {
+      try {
+        Object.keys(localStorage).forEach(function (k) { if (k.indexOf(CACHE_PREFIX) === 0) localStorage.removeItem(k); });
+      } catch (e) { /* ignore */ }
+    },
+  };
+
   var now0 = new Date();
   var state = {
     token: storage.get(TOKEN_KEY),
     user: parseJSON(storage.get(USER_KEY)),
     today: null,
-    employees: null,
+    todayRecord: null,
+    punching: false,
     hist: { tab: 'me', year: now0.getFullYear(), month: now0.getMonth() + 1, target: 'all' },
-    edit: { target: null },
+    edit: { target: null, dirty: false },
   };
 
   function $(s) { return document.querySelector(s); }
@@ -37,18 +59,31 @@
   function fromInputDate(d) { return String(d || '').replace(/-/g, '/'); }
   function weekday(d) { var p = d.split('/'); return new Date(+p[0], +p[1] - 1, +p[2]).getDay(); }
   function fmtDay(d) { var p = d.split('/'); return Number(p[1]) + '/' + Number(p[2]) + '(' + WEEK[weekday(d)] + ')'; }
+  function nowHHmm() { var d = new Date(); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
+  function toMin(t) { var p = t.split(':'); return +p[0] * 60 + +p[1]; }
+  function fmtMin(m) { return Math.floor(m / 60) + ':' + pad2(m % 60); }
+  // サーバーと同じ計算（13:00〜14:00 と重なる時間を除く）
+  function calcWork(inT, outT) {
+    if (!inT || !outT) return '';
+    var a = toMin(inT), b = toMin(outT);
+    if (b <= a) return '';
+    var brk = Math.max(0, Math.min(b, BREAK_END) - Math.max(a, BREAK_START));
+    return fmtMin(b - a - brk);
+  }
+  function monthKey(targetId, y, m) { return 'month:' + targetId + ':' + y + '-' + m; }
 
   // ===== 通信 =====
-  var loadingCount = 0;
-  function setLoading(on) {
-    loadingCount += on ? 1 : -1;
-    $('#loading').hidden = loadingCount <= 0;
+  var syncCount = 0;
+  function setSyncing(on) {
+    syncCount = Math.max(0, syncCount + (on ? 1 : -1));
+    $('#sync').hidden = syncCount === 0;
   }
 
+  // opts.overlay: 画面全体を「読み込み中」にする（ログイン時のみ）
   function api(action, params, opts) {
     var body = Object.assign({ action: action, token: state.token }, params || {});
-    var quiet = opts && opts.quiet;
-    if (!quiet) setLoading(true);
+    var overlay = opts && opts.overlay;
+    if (overlay) $('#loading').hidden = false; else setSyncing(true);
     // Content-Type を付けない（text/plain）ことで CORS の事前確認を避ける
     return fetch(CFG.API_URL, { method: 'POST', body: JSON.stringify(body) })
       .catch(function () { throw new Error('通信できませんでした。電波の良い場所でもう一度お試しください。'); })
@@ -64,7 +99,7 @@
         }
         return j.data;
       })
-      .finally(function () { if (!quiet) setLoading(false); });
+      .finally(function () { if (overlay) $('#loading').hidden = true; else setSyncing(false); });
   }
 
   function handleError(e) {
@@ -92,10 +127,60 @@
   function clearSession() {
     state.token = null;
     state.user = null;
-    state.employees = null;
     storage.del(TOKEN_KEY);
     storage.del(USER_KEY);
-    storage.del(TODAY_KEY);
+    cache.clearAll();
+  }
+
+  // ===== 記憶データの更新 =====
+  function getEmployees() { return cache.get('emps') || []; }
+
+  function getTodayCache() {
+    var c = cache.get('today');
+    if (!c || !state.user || c.userId !== state.user.id || c.date !== localToday()) return null;
+    return c.record;
+  }
+  function setTodayCache(rec) {
+    if (!state.user) return;
+    cache.set('today', { userId: state.user.id, date: localToday(), record: rec || null });
+  }
+
+  /** 1件の勤怠を、記憶している月データ（本人用・全員用）に反映する */
+  function applyRecordToCache(rec) {
+    if (!rec) return;
+    var p = rec.date.split('/');
+    var y = +p[0], m = +p[1];
+    [monthKey(rec.id, y, m), monthKey('all', y, m)].forEach(function (key) {
+      var d = cache.get(key);
+      if (!d) return;
+      var found = false;
+      d.records = d.records.map(function (r) {
+        if (r.date === rec.date && String(r.id) === String(rec.id)) { found = true; return rec; }
+        return r;
+      });
+      if (!found) d.records.push(rec);
+      if (key.indexOf('month:all:') !== 0) {
+        var total = 0;
+        d.records.forEach(function (r) { if (r.work) { var t = r.work.split(':'); total += +t[0] * 60 + +t[1]; } });
+        d.totalWork = fmtMin(total);
+      }
+      cache.set(key, d);
+    });
+    if (state.user && String(rec.id) === String(state.user.id) && rec.date === localToday()) setTodayCache(rec);
+  }
+
+  /** 記憶している月データから、指定日の勤怠を探す */
+  function findCachedRecord(targetId, date) {
+    var p = date.split('/');
+    var keys = [monthKey(targetId, +p[0], +p[1]), monthKey('all', +p[0], +p[1])];
+    for (var i = 0; i < keys.length; i++) {
+      var d = cache.get(keys[i]);
+      if (!d) continue;
+      var r = d.records.filter(function (x) { return x.date === date && String(x.id) === String(targetId); })[0];
+      if (r) return { record: r };
+      if (keys[i].indexOf('month:all:') !== 0) return { record: null }; // 本人の月データにない＝打刻なし
+    }
+    return undefined; // 記憶なし（分からない）
   }
 
   // ===== 画面切り替え =====
@@ -104,6 +189,7 @@
     for (var i = 0; i < views.length; i++) views[i].hidden = views[i].id !== 'view-' + name;
     window.scrollTo(0, 0);
   }
+  function isView(name) { return !$('#view-' + name).hidden; }
 
   function parseHash() {
     var h = location.hash.replace(/^#/, '');
@@ -152,8 +238,9 @@
 
   function onCredential(resp) {
     $('#login-msg').textContent = '';
-    api('login', { idToken: resp.credential })
+    api('login', { idToken: resp.credential }, { overlay: true })
       .then(function (d) {
+        cache.clearAll();
         saveSession(d.token, d.user);
         if (location.hash === '#home') route(); else location.hash = '#home';
       })
@@ -162,7 +249,7 @@
 
   function logout() {
     if (!confirm('ログアウトしますか？\n次に使うときは再度Googleログインが必要です。')) return;
-    var p = state.token ? api('logout', {}, { quiet: true }).catch(function () {}) : Promise.resolve();
+    var p = state.token ? api('logout', {}).catch(function () {}) : Promise.resolve();
     p.then(function () {
       clearSession();
       if (window.google && google.accounts && google.accounts.id) google.accounts.id.disableAutoSelect();
@@ -182,17 +269,6 @@
       ? esc(u.name) + ' さん' + (u.isAdmin ? '<span class="admin-tag">（管理者）</span>' : '')
       : '';
     $('#btn-admin').hidden = !u.isAdmin;
-  }
-
-  // --- 本日の打刻を端末に記憶（開いた瞬間に表示するため。サーバーの応答で上書きする） ---
-  function getTodayCache() {
-    var c = parseJSON(storage.get(TODAY_KEY));
-    if (!c || !state.user || c.userId !== state.user.id || c.date !== localToday()) return null;
-    return c.record;
-  }
-  function setTodayCache(rec) {
-    if (!state.user) return;
-    storage.set(TODAY_KEY, JSON.stringify({ userId: state.user.id, date: localToday(), record: rec || null }));
   }
 
   // pending: 'in' / 'out' のとき、そのボタンを「送信中」表示にする
@@ -220,15 +296,18 @@
     tickClock();
     if (!state.punching) renderToday(getTodayCache()); // 記憶している内容をすぐ表示
     var seq = ++homeSeq;
-    api('home', {}, { quiet: true })
+    api('home', {})
       .then(function (d) {
         state.today = d.date;
         state.user = d.user;
         storage.set(USER_KEY, JSON.stringify(d.user));
-        renderUserHead();
+        // 今月の自分の勤怠と社員一覧も記憶（勤怠履歴・打刻修正をすぐ表示するため）
+        if (d.month) cache.set(monthKey(d.user.id, d.month.year, d.month.month), d.month);
+        if (d.employees) cache.set('emps', d.employees);
+        if (isView('home')) renderUserHead();
         if (seq !== homeSeq || state.punching) return; // この間に打刻していたら無視
-        renderToday(d.record);
         setTodayCache(d.record);
+        if (isView('home')) renderToday(d.record);
       })
       .catch(handleError);
   }
@@ -243,14 +322,13 @@
       overwrite = true;
     }
     // 押した瞬間に表示を切り替える（時刻はサーバーの応答で確定）
-    var now = new Date();
     var optimistic = Object.assign({}, before || {});
-    optimistic[type] = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
+    optimistic[type] = nowHHmm();
     renderToday(optimistic, type);
     state.punching = true;
     homeSeq++;
 
-    return api('punch', { type: type, overwrite: !!overwrite }, { quiet: true })
+    return api('punch', { type: type, overwrite: !!overwrite })
       .then(function (d) {
         state.punching = false;
         if (d.needConfirm) {
@@ -261,26 +339,19 @@
           if (confirm('すでに' + d.label + ' ' + d.current + ' で打刻済みです。\n現在の時刻で上書きしますか？')) return punch(type, true);
           return;
         }
-        renderToday(d.record);
+        applyRecordToCache(d.record);
         setTodayCache(d.record);
+        if (isView('home')) renderToday(d.record);
         toast(d.label + 'しました（' + d.time + '）', 'success');
       })
       .catch(function (e) {
         state.punching = false;
-        renderToday(before); // 失敗したら元の表示に戻す
+        if (isView('home')) renderToday(before); // 失敗したら元の表示に戻す
         handleError(e);
       });
   }
 
-  // ===== 社員一覧（選択肢用） =====
-  function loadEmployees() {
-    if (state.employees) return Promise.resolve(state.employees);
-    return api('employees', {}, { quiet: true }).then(function (d) {
-      state.employees = d.employees;
-      return d.employees;
-    });
-  }
-
+  // ===== 選択肢 =====
   function fillSelect(sel, list, selected, withAll) {
     var html = withAll ? '<option value="all">全員</option>' : '';
     list.forEach(function (e) {
@@ -288,6 +359,13 @@
     });
     sel.innerHTML = html;
     sel.value = selected;
+  }
+
+  function refreshEmployees() {
+    return api('employees', {}).then(function (d) {
+      cache.set('emps', d.employees);
+      return d.employees;
+    });
   }
 
   // ===== 打刻修正 =====
@@ -301,65 +379,114 @@
     dateEl.max = toInputDate(todayStr());
     dateEl.value = toInputDate(date);
     $('#edit-reason').value = '';
+    $('#edit-save').disabled = false;
 
     $('#edit-target-wrap').hidden = !u.isAdmin;
-    if (u.isAdmin) {
-      loadEmployees().then(function (list) {
-        fillSelect($('#edit-target'), list, state.edit.target, false);
-      }).catch(handleError);
-    }
+    if (u.isAdmin) fillSelect($('#edit-target'), getEmployees(), state.edit.target, false);
     loadEditRecord();
     loadEditHistory();
   }
 
+  function editTargetName() {
+    if (String(state.edit.target) === String(state.user.id)) return state.user.name;
+    var e = getEmployees().filter(function (x) { return String(x.id) === String(state.edit.target); })[0];
+    return e ? e.name : '';
+  }
+
+  function fillEditForm(r, known) {
+    $('#edit-in').value = r && r.in ? r.in : '';
+    $('#edit-out').value = r && r.out ? r.out : '';
+    var info = [];
+    if (!known) info.push('読み込み中…');
+    else if (!r) info.push('この日の打刻はありません');
+    else {
+      if (r.kind) info.push('区分：' + r.kind);
+      if (r.work) info.push('実働 ' + r.work + '（休憩13:00〜14:00を除く）');
+    }
+    $('#edit-info').textContent = info.join('　');
+  }
+
+  var editSeq = 0;
   function loadEditRecord() {
     var date = fromInputDate($('#edit-date').value);
     if (!date) return;
-    $('#edit-info').textContent = '';
-    api('getRecord', { date: date, targetId: state.edit.target })
+    var target = state.edit.target;
+    state.edit.dirty = false;
+    // 記憶している内容をすぐ表示
+    var c = findCachedRecord(target, date);
+    fillEditForm(c ? c.record : null, c !== undefined);
+    // 裏で最新を確認（入力を始めていたら上書きしない）
+    var seq = ++editSeq;
+    api('getRecord', { date: date, targetId: target })
       .then(function (d) {
-        var r = d.record;
-        $('#edit-in').value = r && r.in ? r.in : '';
-        $('#edit-out').value = r && r.out ? r.out : '';
-        var info = [];
-        if (!r) info.push('この日の打刻はありません');
-        else {
-          if (r.kind) info.push('区分：' + r.kind);
-          if (r.work) info.push('実働 ' + r.work + '（休憩13:00〜14:00を除く）');
-        }
-        $('#edit-info').textContent = info.join('　');
+        if (seq !== editSeq || state.edit.dirty || !isView('edit')) return;
+        fillEditForm(d.record, true);
       })
       .catch(handleError);
   }
 
+  var editHistSeq = 0;
   function loadEditHistory() {
     var u = state.user;
-    var isSelf = String(state.edit.target) === String(u.id);
+    var target = state.edit.target;
+    var isSelf = String(target) === String(u.id);
     $('#edit-history-title').textContent = isSelf ? '自分の修正履歴' : '修正履歴（選択中の社員）';
-    api('history', { targetId: state.edit.target }, { quiet: true })
-      .then(function (d) { renderHistoryList($('#edit-history'), d.items, false); })
+    var key = 'hist:' + target;
+    var cached = cache.get(key);
+    if (cached) renderHistoryList($('#edit-history'), cached, false);
+    else $('#edit-history').innerHTML = '<li class="empty">読み込み中…</li>';
+    var seq = ++editHistSeq;
+    api('history', { targetId: target })
+      .then(function (d) {
+        cache.set(key, d.items);
+        if (seq === editHistSeq && isView('edit')) renderHistoryList($('#edit-history'), d.items, false);
+      })
       .catch(handleError);
   }
 
   function saveEdit() {
     var date = fromInputDate($('#edit-date').value);
     if (!date) { toast('日付を選んでください', 'error'); return; }
+    if (date > localToday()) { toast('未来の日付は修正できません', 'error'); return; }
     var inT = $('#edit-in').value;
     var outT = $('#edit-out').value;
     if (inT && outT && outT <= inT) { toast('退勤は出勤より後の時刻にしてください', 'error'); return; }
-    var btn = $('#edit-save');
-    btn.disabled = true;
-    api('updateRecord', { date: date, targetId: state.edit.target, in: inT, out: outT, reason: $('#edit-reason').value })
+
+    var target = state.edit.target;
+    var reason = $('#edit-reason').value;
+    var known = findCachedRecord(target, date);
+    var prev = known ? known.record : null;
+    if (known !== undefined && (prev ? prev.in || '' : '') === inT && (prev ? prev.out || '' : '') === outT) {
+      toast('変更はありません');
+      return;
+    }
+
+    // 送信を待たずに画面と記憶を更新して、最初の画面へ戻る
+    var optimistic = { date: date, id: String(target), name: editTargetName(), in: inT, out: outT, work: calcWork(inT, outT), kind: '修正' };
+    applyRecordToCache(optimistic);
+    cache.del('hist:' + target); // 修正履歴は次に開いたときに取り直す
+    cache.del('hist:all');
+    location.hash = '#home';
+    toast('保存中…');
+
+    api('updateRecord', { date: date, targetId: target, in: inT, out: outT, reason: reason })
       .then(function (d) {
-        if (!d.changed) { toast('変更はありません'); return; }
-        // 自分の今日の分を直したら、ホームの表示用の記憶も更新
-        if (String(state.edit.target) === String(state.user.id) && date === localToday()) setTodayCache(d.record);
-        toast('保存しました', 'success');
-        $('#edit-reason').value = '';
-        location.hash = '#home'; // 保存したら最初の画面へ
+        applyRecordToCache(d.record);
+        if (isView('home') && String(target) === String(state.user.id) && date === localToday() && !state.punching) {
+          renderToday(d.record);
+        }
+        toast(d.changed ? '保存しました' : '変更はありません', d.changed ? 'success' : '');
       })
-      .catch(handleError)
-      .finally(function () { btn.disabled = false; });
+      .catch(function (e) {
+        // 失敗したら記憶を捨てて、最新を取り直す
+        var p = date.split('/');
+        cache.del(monthKey(target, +p[0], +p[1]));
+        cache.del(monthKey('all', +p[0], +p[1]));
+        if (String(target) === String(state.user.id) && date === localToday()) cache.del('today');
+        if (e && e.code === 'AUTH') return;
+        toast('保存できませんでした：' + e.message, 'error');
+        if (isView('home')) openHome();
+      });
   }
 
   function renderHistoryList(ul, items, showTarget) {
@@ -386,23 +513,28 @@
     for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].dataset.tab === state.hist.tab);
     var isAll = state.hist.tab === 'all';
     $('#hist-target-wrap').hidden = !isAll;
-    if (isAll) {
-      loadEmployees().then(function (list) {
-        fillSelect($('#hist-target'), list, state.hist.target, true);
-      }).catch(handleError);
-    }
+    if (isAll) fillSelect($('#hist-target'), getEmployees(), state.hist.target, true);
   }
 
+  var monthSeq = 0;
   function loadMonth() {
     var h = state.hist;
     $('#month-label').textContent = h.year + '年' + h.month + '月';
-    $('#hist-body').innerHTML = '';
-    $('#hist-total').textContent = '';
     var targetId = h.tab === 'me' ? state.user.id : h.target;
+    var key = monthKey(targetId, h.year, h.month);
+    var cached = cache.get(key);
+    if (cached) renderMonth(cached, targetId);
+    else {
+      $('#hist-head').innerHTML = '';
+      $('#hist-body').innerHTML = '<tr><td colspan="4" class="blank">読み込み中…</td></tr>';
+      $('#hist-total').textContent = '';
+    }
+    var seq = ++monthSeq;
     api('month', { year: h.year, month: h.month, targetId: targetId })
       .then(function (d) {
         state.today = d.today;
-        renderMonth(d, targetId);
+        cache.set(key, d);
+        if (seq === monthSeq && isView('history')) renderMonth(d, targetId);
       })
       .catch(handleError);
   }
@@ -424,6 +556,7 @@
     var body = $('#hist-body');
     var rows = [];
     var showAllPeople = targetId === 'all';
+    var today = d.today > localToday() ? d.today : localToday();
 
     if (!showAllPeople) {
       head.innerHTML = '<tr><th>日付</th><th>出勤</th><th>退勤</th><th>実働</th></tr>';
@@ -433,7 +566,7 @@
       var canEdit = String(targetId) === String(u.id) || u.isAdmin;
       for (var day = 1; day <= last; day++) {
         var ds = d.year + '/' + pad2(d.month) + '/' + pad2(day);
-        if (ds > d.today) break;
+        if (ds > today) break;
         var r = map[ds];
         rows.push(
           '<tr class="' + (canEdit ? 'clickable' : '') + '" data-date="' + ds + '" data-target="' + esc(targetId) + '">' +
@@ -452,7 +585,7 @@
       d.records.forEach(function (r) { (byDate[r.date] = byDate[r.date] || []).push(r); });
       Object.keys(byDate).sort().reverse().forEach(function (ds) {
         rows.push('<tr class="date-group"><td colspan="4" class="' + dayClass(ds) + '">' + fmtDay(ds) + '</td></tr>');
-        byDate[ds].forEach(function (r) {
+        byDate[ds].sort(function (a, b) { return +a.id - +b.id; }).forEach(function (r) {
           rows.push(
             '<tr class="' + (u.isAdmin || String(r.id) === String(u.id) ? 'clickable' : '') + '" data-date="' + r.date + '" data-target="' + esc(r.id) + '">' +
             '<td>' + esc(r.name) + '</td><td>' + esc(r.in || '--:--') + '</td><td>' + esc(r.out || '--:--') + '</td><td>' +
@@ -461,6 +594,7 @@
         });
       });
       if (!rows.length) rows.push('<tr><td colspan="4" class="blank">データがありません</td></tr>');
+      $('#hist-total').textContent = '';
     }
     body.innerHTML = rows.join('');
   }
@@ -488,17 +622,26 @@
   }
 
   // ===== 管理 =====
+  function renderAdminEmployees(list) {
+    $('#admin-emps').innerHTML = list.map(function (e) {
+      return '<tr><td>' + esc(e.name) + '</td><td>' + (e.isAdmin ? '管理者' : '一般') + '</td><td>' +
+        (e.active ? '○' : '—') + '</td><td class="small">' + esc(e.lastLogin || '未ログイン') + '</td></tr>';
+    }).join('') || '<tr><td colspan="4" class="blank">社員が登録されていません</td></tr>';
+  }
+
   function openAdmin() {
     showView('admin');
-    state.employees = null; // 最新を取り直す
-    loadEmployees().then(function (list) {
-      $('#admin-emps').innerHTML = list.map(function (e) {
-        return '<tr><td>' + esc(e.name) + '</td><td>' + (e.isAdmin ? '管理者' : '一般') + '</td><td>' +
-          (e.active ? '○' : '—') + '</td><td class="small">' + esc(e.lastLogin || '未ログイン') + '</td></tr>';
-      }).join('') || '<tr><td colspan="4" class="blank">社員が登録されていません</td></tr>';
-    }).catch(handleError);
+    renderAdminEmployees(getEmployees());
+    refreshEmployees().then(function (list) { if (isView('admin')) renderAdminEmployees(list); }).catch(handleError);
+
+    var cached = cache.get('hist:all');
+    if (cached) renderHistoryList($('#admin-history'), cached, true);
+    else $('#admin-history').innerHTML = '<li class="empty">読み込み中…</li>';
     api('history', { targetId: 'all' })
-      .then(function (d) { renderHistoryList($('#admin-history'), d.items, true); })
+      .then(function (d) {
+        cache.set('hist:all', d.items);
+        if (isView('admin')) renderHistoryList($('#admin-history'), d.items, true);
+      })
       .catch(handleError);
   }
 
@@ -513,6 +656,9 @@
       state.edit.target = e.target.value;
       loadEditRecord();
       loadEditHistory();
+    });
+    ['#edit-in', '#edit-out'].forEach(function (s) {
+      $(s).addEventListener('input', function () { state.edit.dirty = true; });
     });
     $('#edit-save').addEventListener('click', saveEdit);
 
@@ -532,7 +678,7 @@
     window.addEventListener('hashchange', route);
     // アプリに戻ってきたとき、ホームなら本日の状態を更新
     document.addEventListener('visibilitychange', function () {
-      if (!document.hidden && state.token && !$('#view-home').hidden) openHome();
+      if (!document.hidden && state.token && isView('home')) openHome();
     });
     setInterval(tickClock, 10000);
   }

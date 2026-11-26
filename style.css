@@ -117,6 +117,13 @@ body {
 .badge.edit { background: var(--edit); }
 .date-group td { background: #f8fafc; text-align: left; font-weight: 600; font-size: 13px; padding: 6px 10px; }
 
+/* 裏で最新を取得中の小さな表示 */
+.sync {
+  position: fixed; top: calc(8px + env(safe-area-inset-top)); right: 10px; z-index: 40;
+  background: rgba(37, 99, 235, .9); color: #fff; font-size: 12px; padding: 4px 10px; border-radius: 999px;
+  pointer-events: none;
+}
+
 /* ローディング・トースト */
 .loading { position: fixed; inset: 0; background: rgba(255,255,255,.5); display: flex; align-items: center; justify-content: center; z-index: 50; }
 .spinner { width: 40px; height: 40px; border: 4px solid #dbeafe; border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; }

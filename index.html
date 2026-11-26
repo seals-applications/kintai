@@ -10,8 +10,8 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <meta name="apple-mobile-web-app-title" content="勤怠報告">
   <!-- 画面を更新したら ?v= の数字を1つ上げる（スマホに古い画面が残らないように） -->
-  <link rel="stylesheet" href="style.css?v=3">
-  <script src="config.js?v=3"></script>
+  <link rel="stylesheet" href="style.css?v=4">
+  <script src="config.js?v=4"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -117,9 +117,10 @@
     <ul id="admin-history" class="history-list"></ul>
   </section>
 
+  <div id="sync" class="sync" hidden>更新中…</div>
   <div id="loading" class="loading" hidden><div class="spinner"></div></div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>
