@@ -176,15 +176,26 @@
 
   function renderUserHead() {
     var u = state.user || {};
-    $('#home-name').textContent = u.name ? u.name + ' さん' : '';
+    $('#home-name').innerHTML = u.name
+      ? esc(u.name) + ' さん' + (u.isAdmin ? '<span class="admin-tag">（管理者）</span>' : '')
+      : '';
     $('#btn-admin').hidden = !u.isAdmin;
   }
 
   function renderToday(rec) {
     var d = todayStr();
-    var inT = rec && rec.in ? rec.in : '--:--';
-    var outT = rec && rec.out ? rec.out : '--:--';
-    $('#home-today').textContent = fmtDay(d) + '　出勤 ' + inT + ' ／ 退勤 ' + outT;
+    var inT = rec && rec.in ? rec.in : '';
+    var outT = rec && rec.out ? rec.out : '';
+    $('#home-today').textContent = fmtDay(d) + '　出勤 ' + (inT || '--:--') + ' ／ 退勤 ' + (outT || '--:--');
+    renderPunchButton($('#btn-in'), '出 勤', '出勤済', inT);
+    renderPunchButton($('#btn-out'), '退 勤', '退勤済', outT);
+  }
+
+  // 打刻済みならボタンを「✓ 出勤済 09:58」の表示に変える（押せば上書きの確認が出る）
+  function renderPunchButton(btn, label, doneLabel, time) {
+    btn.classList.toggle('done', !!time);
+    btn.querySelector('.big-label').textContent = time ? '✓ ' + doneLabel + '　' + time : label;
+    btn.querySelector('.big-sub').textContent = time ? 'タップで打ち直し' : '';
   }
 
   function openHome() {
