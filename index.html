@@ -10,8 +10,8 @@
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <meta name="apple-mobile-web-app-title" content="勤怠報告">
   <!-- 画面を更新したら ?v= の数字を1つ上げる（スマホに古い画面が残らないように） -->
-  <link rel="stylesheet" href="style.css?v=4">
-  <script src="config.js?v=4"></script>
+  <link rel="stylesheet" href="style.css?v=5">
+  <script src="config.js?v=5"></script>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -55,7 +55,7 @@
 
   <!-- 打刻修正 -->
   <section id="view-edit" class="view" hidden>
-    <header class="bar"><a href="#home" class="back">‹ 戻る</a><h2>打刻修正</h2></header>
+    <header class="bar"><a href="#home" id="edit-back" class="back">‹ 戻る</a><h2>打刻修正</h2></header>
     <div class="card">
       <label id="edit-target-wrap" class="field" hidden>社員
         <select id="edit-target"></select>
@@ -121,6 +121,6 @@
   <div id="loading" class="loading" hidden><div class="spinner"></div></div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

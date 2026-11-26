@@ -374,6 +374,8 @@
     var u = state.user;
     var date = params.date ? fromInputDate(params.date) : todayStr();
     state.edit.target = params.target || u.id;
+    // 勤怠履歴から来たときは「戻る」で勤怠履歴へ（表示していた月・タブ・位置のまま）
+    $('#edit-back').setAttribute('href', params.from === 'history' ? '#history' : '#home');
 
     var dateEl = $('#edit-date');
     dateEl.max = toInputDate(todayStr());
@@ -506,6 +508,11 @@
     showView('history');
     renderTabs();
     loadMonth();
+    // 打刻修正から戻ってきたときは、元のスクロール位置に戻す
+    if (state.hist.scrollY) {
+      window.scrollTo(0, state.hist.scrollY);
+      state.hist.scrollY = 0;
+    }
   }
 
   function renderTabs() {
@@ -605,7 +612,8 @@
     var target = tr.dataset.target;
     var q = 'date=' + encodeURIComponent(toInputDate(tr.dataset.date));
     if (target && target !== 'all' && String(target) !== String(state.user.id)) q += '&target=' + encodeURIComponent(target);
-    location.hash = '#edit?' + q;
+    state.hist.scrollY = window.scrollY; // 戻ってきたときに同じ位置を表示するため
+    location.hash = '#edit?' + q + '&from=history';
   }
 
   function moveMonth(delta) {
