@@ -4,6 +4,7 @@
   var CFG = window.APP_CONFIG || {};
   var TOKEN_KEY = 'kintai_token';
   var USER_KEY = 'kintai_user';
+  var TODAY_KEY = 'kintai_today';
   var WEEK = ['日', '月', '火', '水', '木', '金', '土'];
 
   var storage = {
@@ -94,6 +95,7 @@
     state.employees = null;
     storage.del(TOKEN_KEY);
     storage.del(USER_KEY);
+    storage.del(TODAY_KEY);
   }
 
   // ===== 画面切り替え =====
@@ -182,52 +184,92 @@
     $('#btn-admin').hidden = !u.isAdmin;
   }
 
-  function renderToday(rec) {
+  // --- 本日の打刻を端末に記憶（開いた瞬間に表示するため。サーバーの応答で上書きする） ---
+  function getTodayCache() {
+    var c = parseJSON(storage.get(TODAY_KEY));
+    if (!c || !state.user || c.userId !== state.user.id || c.date !== localToday()) return null;
+    return c.record;
+  }
+  function setTodayCache(rec) {
+    if (!state.user) return;
+    storage.set(TODAY_KEY, JSON.stringify({ userId: state.user.id, date: localToday(), record: rec || null }));
+  }
+
+  // pending: 'in' / 'out' のとき、そのボタンを「送信中」表示にする
+  function renderToday(rec, pending) {
+    state.todayRecord = rec || null;
     var d = todayStr();
     var inT = rec && rec.in ? rec.in : '';
     var outT = rec && rec.out ? rec.out : '';
     $('#home-today').textContent = fmtDay(d) + '　出勤 ' + (inT || '--:--') + ' ／ 退勤 ' + (outT || '--:--');
-    renderPunchButton($('#btn-in'), '出 勤', '出勤済', inT);
-    renderPunchButton($('#btn-out'), '退 勤', '退勤済', outT);
+    renderPunchButton($('#btn-in'), '出 勤', '出勤済', inT, pending === 'in');
+    renderPunchButton($('#btn-out'), '退 勤', '退勤済', outT, pending === 'out');
   }
 
   // 打刻済みならボタンを「✓ 出勤済 09:58」の表示に変える（押せば上書きの確認が出る）
-  function renderPunchButton(btn, label, doneLabel, time) {
+  function renderPunchButton(btn, label, doneLabel, time, sending) {
     btn.classList.toggle('done', !!time);
     btn.querySelector('.big-label').textContent = time ? '✓ ' + doneLabel + '　' + time : label;
-    btn.querySelector('.big-sub').textContent = time ? 'タップで打ち直し' : '';
+    btn.querySelector('.big-sub').textContent = sending ? '送信中…' : time ? 'タップで打ち直し' : '';
   }
 
+  var homeSeq = 0; // 古い応答で新しい表示を上書きしないための番号
   function openHome() {
     showView('home');
     renderUserHead();
     tickClock();
+    if (!state.punching) renderToday(getTodayCache()); // 記憶している内容をすぐ表示
+    var seq = ++homeSeq;
     api('home', {}, { quiet: true })
       .then(function (d) {
         state.today = d.date;
         state.user = d.user;
         storage.set(USER_KEY, JSON.stringify(d.user));
         renderUserHead();
+        if (seq !== homeSeq || state.punching) return; // この間に打刻していたら無視
         renderToday(d.record);
+        setTodayCache(d.record);
       })
       .catch(handleError);
   }
 
   function punch(type, overwrite) {
-    var btns = [$('#btn-in'), $('#btn-out')];
-    btns.forEach(function (b) { b.disabled = true; });
-    return api('punch', { type: type, overwrite: !!overwrite })
+    if (state.punching) return;
+    var label = type === 'in' ? '出勤' : '退勤';
+    var before = state.todayRecord;
+    // 端末側で打刻済みが分かっていれば、送信前に確認する
+    if (!overwrite && before && before[type]) {
+      if (!confirm('すでに' + label + ' ' + before[type] + ' で打刻済みです。\n現在の時刻で上書きしますか？')) return;
+      overwrite = true;
+    }
+    // 押した瞬間に表示を切り替える（時刻はサーバーの応答で確定）
+    var now = new Date();
+    var optimistic = Object.assign({}, before || {});
+    optimistic[type] = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
+    renderToday(optimistic, type);
+    state.punching = true;
+    homeSeq++;
+
+    return api('punch', { type: type, overwrite: !!overwrite }, { quiet: true })
       .then(function (d) {
+        state.punching = false;
         if (d.needConfirm) {
-          btns.forEach(function (b) { b.disabled = false; });
+          // 端末の記憶が古く、サーバー側では打刻済みだった場合
+          var cur = Object.assign({}, before || {});
+          cur[type] = d.current;
+          renderToday(cur);
           if (confirm('すでに' + d.label + ' ' + d.current + ' で打刻済みです。\n現在の時刻で上書きしますか？')) return punch(type, true);
           return;
         }
         renderToday(d.record);
+        setTodayCache(d.record);
         toast(d.label + 'しました（' + d.time + '）', 'success');
       })
-      .catch(handleError)
-      .finally(function () { btns.forEach(function (b) { b.disabled = false; }); });
+      .catch(function (e) {
+        state.punching = false;
+        renderToday(before); // 失敗したら元の表示に戻す
+        handleError(e);
+      });
   }
 
   // ===== 社員一覧（選択肢用） =====
@@ -310,10 +352,11 @@
     api('updateRecord', { date: date, targetId: state.edit.target, in: inT, out: outT, reason: $('#edit-reason').value })
       .then(function (d) {
         if (!d.changed) { toast('変更はありません'); return; }
+        // 自分の今日の分を直したら、ホームの表示用の記憶も更新
+        if (String(state.edit.target) === String(state.user.id) && date === localToday()) setTodayCache(d.record);
         toast('保存しました', 'success');
         $('#edit-reason').value = '';
-        loadEditRecord();
-        loadEditHistory();
+        location.hash = '#home'; // 保存したら最初の画面へ
       })
       .catch(handleError)
       .finally(function () { btn.disabled = false; });
